@@ -1,0 +1,8 @@
+{
+  "name": "HermesPet AI Companion",
+  "description": "An interactive AI desktop companion simulator inspired by HermesPet, featuring multi-engine support, virtual desktop integration, intelligent task planners, custom pet assets, and Windows integration guidelines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

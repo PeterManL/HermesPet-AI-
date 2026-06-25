@@ -48,3 +48,11 @@ export interface DesktopIcon {
   color: string;
   appId: string;
 }
+
+export interface AiModelSettings {
+  provider: "default" | "openai" | "anthropic" | "gemini";
+  baseUrl: string;
+  modelName: string;
+  apiKey: string;
+}
+

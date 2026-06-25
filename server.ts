@@ -38,10 +38,230 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// 2. API: Chat with Pet (Supporting multi-engine emulation)
+// 2. API: Chat with Pet (Supporting multi-engine emulation & custom providers)
+interface AiModelSettings {
+  provider: "default" | "openai" | "anthropic" | "gemini";
+  baseUrl?: string;
+  modelName?: string;
+  apiKey?: string;
+}
+
+async function executeCustomAI(
+  settings: AiModelSettings | undefined,
+  systemInstruction: string,
+  message: string,
+  history: Array<{ role: "user" | "model"; text: string }>,
+  jsonMode: boolean = false
+): Promise<string> {
+  const provider = settings?.provider || "default";
+  const maxRetries = 3;
+  let delayMs = 1500;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (provider === "default") {
+        const ai = getGeminiClient();
+        const contents: any[] = [];
+        if (history && Array.isArray(history)) {
+          for (const h of history) {
+            contents.push({
+              role: h.role === "user" ? "user" : "model",
+              parts: [{ text: h.text }],
+            });
+          }
+        }
+        contents.push({ role: "user", parts: [{ text: message }] });
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.8,
+            ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+          },
+        });
+        return response.text || "";
+      }
+
+      if (provider === "openai") {
+        const baseUrl = (settings?.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+        const model = settings?.modelName || "gpt-4o-mini";
+        const apiKey = settings?.apiKey || "";
+
+        const messages = [
+          { role: "system", content: systemInstruction },
+          ...history.map((h) => ({
+            role: h.role === "user" ? "user" : "assistant",
+            content: h.text,
+          })),
+          { role: "user", content: message },
+        ];
+
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.8,
+          }),
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`OpenAI API returned status ${res.status}: ${errorText}`);
+        }
+
+        const data: any = await res.json();
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+          throw new Error("Invalid response format from OpenAI API provider");
+        }
+        return data.choices[0].message.content || "";
+      }
+
+      if (provider === "anthropic") {
+        const baseUrl = (settings?.baseUrl || "https://api.anthropic.com/v1").replace(/\/$/, "");
+        const model = settings?.modelName || "claude-3-5-sonnet-latest";
+        const apiKey = settings?.apiKey || "";
+
+        const messages = [
+          ...history.map((h) => ({
+            role: h.role === "user" ? "user" : "assistant",
+            content: h.text,
+          })),
+          { role: "user", content: message },
+        ];
+
+        const res = await fetch(`${baseUrl}/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            system: systemInstruction,
+            messages,
+            max_tokens: 1500,
+            temperature: 0.8,
+          }),
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Anthropic API returned status ${res.status}: ${errorText}`);
+        }
+
+        const data: any = await res.json();
+        if (!data.content || !data.content[0]) {
+          throw new Error("Invalid response format from Anthropic API provider");
+        }
+        return data.content[0].text || "";
+      }
+
+      if (provider === "gemini") {
+        const apiKey = settings?.apiKey || "";
+        const model = settings?.modelName || "gemini-3.5-flash";
+        
+        const customAi = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
+
+        const contents: any[] = [];
+        if (history && Array.isArray(history)) {
+          for (const h of history) {
+            contents.push({
+              role: h.role === "user" ? "user" : "model",
+              parts: [{ text: h.text }],
+            });
+          }
+        }
+        contents.push({ role: "user", parts: [{ text: message }] });
+
+        const response = await customAi.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.8,
+            ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+          },
+        });
+        return response.text || "";
+      }
+
+      throw new Error(`Unknown provider: ${provider}`);
+    } catch (err: any) {
+      const errMsg = err.message || "";
+      const isRetryable = 
+        errMsg.includes("503") || 
+        errMsg.includes("429") || 
+        errMsg.includes("UNAVAILABLE") ||
+        errMsg.includes("RESOURCE_EXHAUSTED") ||
+        errMsg.includes("temporary") ||
+        errMsg.includes("high demand") ||
+        errMsg.includes("experiencing high demand") ||
+        errMsg.includes("Spikes in demand");
+
+      if (isRetryable && attempt < maxRetries) {
+        console.warn(`[AI Custom execution] Attempt ${attempt} failed with retryable error. Retrying in ${delayMs}ms... Error:`, errMsg);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs *= 2;
+        continue;
+      }
+      console.error(`[AI Custom execution] Error on attempt ${attempt}:`, errMsg);
+      throw err;
+    }
+  }
+  throw new Error("Execution failed after maximum retries");
+}
+
+function extractJsonArray(text: string): any[] {
+  let cleanText = text.trim();
+  if (cleanText.startsWith("```")) {
+    const lines = cleanText.split("\n");
+    if (lines[0].includes("json") || lines[0].trim() === "```") {
+      lines.shift();
+    }
+    if (lines[lines.length - 1].trim() === "```") {
+      lines.pop();
+    }
+    cleanText = lines.join("\n").trim();
+  }
+  
+  try {
+    const parsed = JSON.parse(cleanText);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.tasks)) return parsed.tasks;
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.data)) return parsed.data;
+  } catch (e) {
+    const startIdx = cleanText.indexOf("[");
+    const endIdx = cleanText.lastIndexOf("]");
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      try {
+        const parsed = JSON.parse(cleanText.substring(startIdx, endIdx + 1));
+        if (Array.isArray(parsed)) return parsed;
+      } catch (err) {
+        console.error("Sub-parsing error for tasks JSON:", err);
+      }
+    }
+  }
+  return [];
+}
+
 app.post("/api/pet/chat", async (req, res) => {
   try {
-    const { message, history, petType, petName, engine, activeTask, mood } = req.body;
+    const { message, history, petType, petName, engine, activeTask, mood, aiModelSettings } = req.body;
 
     const petInfo = {
       Hermes: {
@@ -64,7 +284,17 @@ app.post("/api/pet/chat", async (req, res) => {
         personality: "talkative, logical, hyper-active, always flying around, speaks with bird emojis and mechanic terms like *adjusts goggles* or *chirps loudly*",
         phrase: "System optimized! Chirp!",
       },
-    }[petType as "Hermes" | "Mochi" | "Kuro" | "Pippin"] || {
+      Lulu: {
+        species: "Cyber Cotton Rabbit",
+        personality: "fluffy, time-leaping, health-minded, energetic, speaks with bunny bouncy movements like *boings happily* or *nibbles a virtual carrot*",
+        phrase: "Time to stretch and hydrate! *boing*",
+      },
+      Cookie: {
+        species: "Neon Shiba Inu",
+        personality: "loyal, network-guarding, bug-smelling, puppy-like, speaks with cute barks and tail wags like *wags tail* or *sniffs around*",
+        phrase: "Woof! Safe and sound!",
+      }
+    }[petType as "Hermes" | "Mochi" | "Kuro" | "Pippin" | "Lulu" | "Cookie"] || {
       species: "Cute Pet",
       personality: "friendly, helpful",
       phrase: "Hello!",
@@ -92,35 +322,10 @@ Guidelines for formatting:
 3. Avoid dry, boring chatbot text. Be interactive, responsive, and cute.
 `;
 
-    // Initialize Gemini
-    const ai = getGeminiClient();
-    const contents = [];
-
-    // Append formatted conversation history
-    if (history && Array.isArray(history)) {
-      for (const h of history) {
-        contents.push({
-          role: h.role === "user" ? "user" : "model",
-          parts: [{ text: h.text }],
-        });
-      }
-    }
-    contents.push({ role: "user", parts: [{ text: message }] });
-
-    // Call Gemini API
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.8,
-      },
-    });
-
-    const replyText = response.text || "(*looks confused* I got a bit dizzy...)";
+    const replyText = await executeCustomAI(aiModelSettings, systemInstruction, message, history || []);
     res.json({ reply: replyText });
   } catch (err: any) {
-    console.error("Gemini API error:", err);
+    console.error("AI chat generation error:", err);
     res.status(500).json({
       error: "Failed to generate AI response",
       details: err.message,
@@ -131,7 +336,7 @@ Guidelines for formatting:
 // 3. API: Break down a high-level goal into actionable, cute tasks for the pet
 app.post("/api/pet/plan-tasks", async (req, res) => {
   try {
-    const { goal, petType } = req.body;
+    const { goal, petType, aiModelSettings } = req.body;
 
     const systemInstruction = `You are an expert task planning assistant.
 The user wants to accomplish the following goal: "${goal}".
@@ -149,29 +354,8 @@ Return the output strictly in a JSON array. Each element must be an object with 
 - "type": string (one of: "code", "design", "break", "review", "admin")
 `;
 
-    const ai = getGeminiClient();
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: "Generate tasks for goal: " + goal,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              estimatedMinutes: { type: Type.INTEGER },
-              type: { type: Type.STRING },
-            },
-            required: ["title", "estimatedMinutes", "type"],
-          },
-        },
-      },
-    });
-
-    const tasksJson = JSON.parse(response.text || "[]");
+    const replyText = await executeCustomAI(aiModelSettings, systemInstruction, "Generate tasks for goal: " + goal, [], true);
+    const tasksJson = extractJsonArray(replyText);
     res.json({ tasks: tasksJson });
   } catch (err: any) {
     console.error("Task Planner error:", err);

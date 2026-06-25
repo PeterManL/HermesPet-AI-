@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
-  Terminal as TermIcon, Briefcase, ShoppingBag, Laptop, Settings, 
+  Terminal as TermIcon, Briefcase, ShoppingBag, Settings, 
   Coins, Sparkles, Trophy, Heart, Coffee, Moon, Battery, Calendar, 
   Clock, Monitor, RefreshCw, Star, ArrowUpRight, Smile, Gamepad2, Info,
   Volume2, VolumeX
 } from "lucide-react";
 
-import { PetStats, Task, ChatMessage, FoodItem } from "./types";
+import { PetStats, Task, ChatMessage, FoodItem, AiModelSettings } from "./types";
 import { SHOP_ITEMS, PET_PROFILES } from "./data";
 import { playFeedSound, playAlertWarningSound, playLevelUpSound, toggleMute, getMutedStatus } from "./lib/sound";
 import DynamicIsland from "./components/DynamicIsland";
 import PetTerminal from "./components/PetTerminal";
 import TaskPlanner from "./components/TaskPlanner";
 import PetShop from "./components/PetShop";
-import WindowsCompanion from "./components/WindowsCompanion";
 import FloatingPet from "./components/FloatingPet";
+import DesktopStage from "./components/DesktopStage";
 
 const INITIAL_STATS: PetStats = {
   type: "Hermes",
@@ -65,15 +65,35 @@ export default function App() {
   const [currentEngine, setCurrentEngine] = useState("Gemini 3.5");
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isGeneratingTasks, setIsGeneratingTasks] = useState(false);
-  const [activeApp, setActiveApp] = useState<"terminal" | "planner" | "shop" | "windows" | "settings" | null>("terminal");
+  const [activeApp, setActiveApp] = useState<"terminal" | "planner" | "shop" | "settings" | null>("terminal");
   const [latestSpeech, setLatestSpeech] = useState<string | null>("*摇了摇毛茸茸的尾巴* 嗨！欢迎回到我的桌面世界！点击左侧的 [待办规划] 按钮，我们可以一起完成今天的工作哦！");
   const [localTime, setLocalTime] = useState("");
   const [localDate, setLocalDate] = useState("");
   const [showLevelUpAlert, setShowLevelUpAlert] = useState(false);
   const [editingName, setEditingName] = useState(petStats.name);
   const [audioMuted, setAudioMuted] = useState(() => getMutedStatus());
+  const [aiModelSettings, setAiModelSettings] = useState<AiModelSettings>(() => {
+    try {
+      const stored = localStorage.getItem("hermes_pet_model_settings");
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error("Failed to parse stored ai model settings:", e);
+    }
+    return {
+      provider: "default",
+      baseUrl: "",
+      modelName: "",
+      apiKey: ""
+    };
+  });
 
   // Sync state to localStorage
+  useEffect(() => {
+    localStorage.setItem("hermes_pet_model_settings", JSON.stringify(aiModelSettings));
+  }, [aiModelSettings]);
+
   useEffect(() => {
     localStorage.setItem("hermes_pet_stats_v2", JSON.stringify(petStats));
   }, [petStats]);
@@ -214,7 +234,8 @@ export default function App() {
           petName: petStats.name,
           engine: currentEngine,
           activeTask: tasks.find(t => t.id === petStats.activeTaskId)?.title || null,
-          mood: petStats.mood > 70 ? "Happy" : petStats.mood < 30 ? "Sad/Tired" : "Normal"
+          mood: petStats.mood > 70 ? "Happy" : petStats.mood < 30 ? "Sad/Tired" : "Normal",
+          aiModelSettings: aiModelSettings
         })
       });
 
@@ -258,7 +279,7 @@ export default function App() {
       const res = await fetch("/api/pet/plan-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, petType: petStats.type })
+        body: JSON.stringify({ goal, petType: petStats.type, aiModelSettings: aiModelSettings })
       });
 
       const data = await res.json();
@@ -513,22 +534,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveApp("windows")}
-            className="flex flex-col items-center gap-1 w-24 group text-center cursor-pointer select-none"
-          >
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-all transform hover:scale-110 active:scale-95 ${
-              activeApp === "windows" 
-                ? "bg-indigo-600 text-white shadow-indigo-300 shadow-xl scale-105 border-2 border-white" 
-                : "bg-white border-2 border-slate-100 text-indigo-500 hover:border-indigo-200"
-            }`}>
-              <Laptop className="w-6 h-6 stroke-[2.2]" />
-            </div>
-            <span className="text-[10px] font-extrabold tracking-wide text-slate-600 group-hover:text-indigo-900">
-              EXE客户端
-            </span>
-          </button>
-
-          <button
             onClick={() => setActiveApp("settings")}
             className="flex flex-col items-center gap-1 w-24 group text-center cursor-pointer select-none"
           >
@@ -548,13 +553,14 @@ export default function App() {
         {/* FLOATING DIALOGS & PANELS (Nested in a gorgeous white border-4 container) */}
         <div className="flex-1 ml-6 relative flex items-center justify-center pointer-events-none">
           <AnimatePresence mode="wait">
-            {activeApp && (
+            {activeApp ? (
               <motion.div
+                key="active-app-window"
                 initial={{ opacity: 0, scale: 0.95, y: 15 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 15 }}
                 transition={{ duration: 0.25 }}
-                className="w-full max-w-2xl h-[500px] pointer-events-auto shadow-2xl"
+                className="w-full max-w-4xl lg:max-w-5xl h-[calc(100vh-160px)] max-h-[720px] md:max-h-[780px] lg:max-h-[850px] min-h-[480px] pointer-events-auto shadow-2xl"
               >
                 {activeApp === "terminal" && (
                   <PetTerminal
@@ -591,13 +597,6 @@ export default function App() {
                   />
                 )}
 
-                {activeApp === "windows" && (
-                  <WindowsCompanion
-                    appUrl={typeof window !== "undefined" ? window.location.origin : ""}
-                    onClose={() => setActiveApp(null)}
-                  />
-                )}
-
                 {activeApp === "settings" && (
                   <div className="flex flex-col h-full bg-white border-2 border-indigo-100 rounded-3xl overflow-hidden shadow-xl p-6 font-mono text-xs text-slate-700">
                     <div className="flex justify-between items-center border-b-2 border-indigo-50 pb-3 mb-4 select-none">
@@ -613,7 +612,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto pr-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pr-1">
                       {/* Left Block: Rename Form */}
                       <form onSubmit={handleSaveSettings} className="space-y-4 bg-indigo-50/30 p-4 rounded-2xl border-2 border-indigo-100/40">
                         <span className="font-bold text-indigo-950 block border-b border-indigo-100 pb-1.5">📝 自定义宠物爱称</span>
@@ -716,22 +715,130 @@ export default function App() {
                           <span>宠物处于【专注】状态时无法变身，需要先在待办规划本中结束协同专注。</span>
                         </div>
                       </div>
+
+                      {/* Right-most Block: AI Model Connection settings */}
+                      <div className="space-y-4 bg-indigo-50/30 p-4 rounded-2xl border-2 border-indigo-100/40 flex flex-col justify-between">
+                        <div>
+                          <span className="font-bold text-indigo-950 block border-b border-indigo-100 pb-1.5">🧠 AI 脑电波接口设置</span>
+                          <p className="text-[10px] text-slate-500 mt-1 mb-3">您可以自主对接第三方 AI 接口，支持 OpenAI/DeepSeek 等各类大模型通道！</p>
+                          
+                          <div className="space-y-2.5 text-slate-700 text-[11px]">
+                            <div className="space-y-1">
+                              <span className="font-bold text-indigo-900 block">服务商选择</span>
+                              <select
+                                value={aiModelSettings.provider}
+                                onChange={(e) => setAiModelSettings(prev => ({ ...prev, provider: e.target.value as any }))}
+                                className="w-full bg-white border-2 border-indigo-100 rounded-xl px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:border-indigo-400"
+                              >
+                                <option value="default">内置高级大脑 (Gemini 3.5)</option>
+                                <option value="openai">OpenAI / DeepSeek (兼容接口)</option>
+                                <option value="anthropic">Anthropic (Claude 官方)</option>
+                                <option value="gemini">Gemini (自定义密钥)</option>
+                              </select>
+                            </div>
+
+                            {aiModelSettings.provider !== "default" && (
+                              <>
+                                {aiModelSettings.provider !== "gemini" && (
+                                  <div className="space-y-1 animate-fade-in">
+                                    <span className="font-bold text-indigo-900 block">Base URL (接口地址)</span>
+                                    <input
+                                      type="text"
+                                      value={aiModelSettings.baseUrl}
+                                      onChange={(e) => setAiModelSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                      placeholder={aiModelSettings.provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com/v1"}
+                                      className="w-full bg-white border-2 border-indigo-100 rounded-xl px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:border-indigo-400"
+                                    />
+                                  </div>
+                                )}
+
+                                <div className="space-y-1">
+                                  <span className="font-bold text-indigo-900 block">模型名称 (Model Name)</span>
+                                  <input
+                                    type="text"
+                                    value={aiModelSettings.modelName}
+                                    onChange={(e) => setAiModelSettings(prev => ({ ...prev, modelName: e.target.value }))}
+                                    placeholder={
+                                      aiModelSettings.provider === "openai" 
+                                        ? "gpt-4o-mini 或 deepseek-chat" 
+                                        : aiModelSettings.provider === "anthropic"
+                                        ? "claude-3-5-sonnet-latest"
+                                        : "gemini-3.5-flash"
+                                    }
+                                    className="w-full bg-white border-2 border-indigo-100 rounded-xl px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <span className="font-bold text-indigo-900 block">API Key (密钥)</span>
+                                  <input
+                                    type="password"
+                                    value={aiModelSettings.apiKey}
+                                    onChange={(e) => setAiModelSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                                    placeholder="sk-..."
+                                    className="w-full bg-white border-2 border-indigo-100 rounded-xl px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-indigo-100/50 flex justify-between items-center text-[10px]">
+                          <span className={aiModelSettings.provider === "default" ? "text-emerald-600 font-bold" : "text-indigo-600 font-bold"}>
+                            {aiModelSettings.provider === "default" ? "🟢 内置大脑在线" : "⚡ 自定义大脑就绪"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              localStorage.setItem("hermes_pet_model_settings", JSON.stringify(aiModelSettings));
+                              setLatestSpeech("*高兴得跳起来* 嘀—— 新的 AI 大脑脑电波接入成功！我感觉浑身充满了智慧！");
+                            }}
+                            className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-3 py-1 rounded-lg transition-colors"
+                          >
+                            保存大脑配置
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="desktop-stage"
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
+                transition={{ duration: 0.3 }}
+                className="w-full h-[calc(100vh-160px)] max-h-[720px] md:max-h-[780px] lg:max-h-[850px] min-h-[480px] pointer-events-auto"
+              >
+                <DesktopStage
+                  petStats={petStats}
+                  setPetStats={setPetStats}
+                  tasks={tasks}
+                  onToggleTask={handleToggleTask}
+                  onAddTask={handleAddCustomTask}
+                  latestSpeech={latestSpeech}
+                  setLatestSpeech={setLatestSpeech}
+                  onSwitchSpecies={handleSwitchPetSpecies}
+                  onOpenApp={(app) => setActiveApp(app)}
+                />
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
         {/* THE FLOATING VIRTUAL CHARACTER CONTAINER */}
-        <FloatingPet
-          petStats={petStats}
-          onPetClicked={handlePetClicked}
-          latestSpeech={latestSpeech}
-          setLatestSpeech={setLatestSpeech}
-          setPetStats={setPetStats}
-        />
+        {activeApp && (
+          <FloatingPet
+            petStats={petStats}
+            onPetClicked={handlePetClicked}
+            latestSpeech={latestSpeech}
+            setLatestSpeech={setLatestSpeech}
+            setPetStats={setPetStats}
+          />
+        )}
 
       </div>
 

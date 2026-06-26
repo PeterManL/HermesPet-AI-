@@ -117,6 +117,9 @@ const EMOTE_SPEECHES: Record<PetType, Record<string, { high: string; low: string
   }
 };
 
+let globalHeartCounter = 0;
+let globalEmoteCounter = 0;
+
 export default function FloatingPet({ 
   petStats, 
   onPetClicked, 
@@ -298,7 +301,7 @@ export default function FloatingPet({
     onPetClicked();
     playPetSound(petStats.type, "click");
     const newHeart = {
-      id: Date.now() + Math.random(),
+      id: Date.now() + Math.random() + (++globalHeartCounter),
       x: (Math.random() * 40) - 20,
       y: -30
     };
@@ -321,7 +324,7 @@ export default function FloatingPet({
 
   const spawnEmoteParticles = (emoji: string, count: number) => {
     const newParticles: EmoteParticle[] = Array.from({ length: count }).map((_, i) => ({
-      id: Date.now() + Math.random() + i,
+      id: Date.now() + Math.random() + i + (++globalEmoteCounter),
       emoji,
       x: (Math.random() * 80) - 40,
       y: -20,

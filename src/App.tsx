@@ -66,7 +66,25 @@ export default function App() {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("hermes_pet_tasks_v2");
       if (saved) {
-        try { return JSON.parse(saved); } catch (e) { return []; }
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const seen = new Set<string>();
+            return parsed.map((t: any, index: number) => {
+              let id = t.id || `${Date.now()}-${index}`;
+              // Force string comparison and ensure unique IDs
+              id = String(id);
+              if (seen.has(id)) {
+                id = `${id}-${Math.random().toString(36).substring(2, 9)}-${index}`;
+              }
+              seen.add(id);
+              return { ...t, id };
+            });
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
       }
     }
     return [];
@@ -76,7 +94,24 @@ export default function App() {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("hermes_pet_chat_v2");
       if (saved) {
-        try { return JSON.parse(saved); } catch (e) { return []; }
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const seen = new Set<string>();
+            return parsed.map((c: any, index: number) => {
+              let id = c.id || `${Date.now()}-${index}`;
+              id = String(id);
+              if (seen.has(id)) {
+                id = `${id}-${Math.random().toString(36).substring(2, 9)}-${index}`;
+              }
+              seen.add(id);
+              return { ...c, id };
+            });
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
       }
     }
     return [];
@@ -228,7 +263,7 @@ export default function App() {
 
     // Append user message immediately
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       role: "user",
       text,
       timestamp: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
@@ -262,7 +297,7 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.reply) {
         const petMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           role: "model",
           text: data.reply,
           timestamp: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),

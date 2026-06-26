@@ -33,6 +33,8 @@ interface LogEntry {
   type: "system" | "feed" | "play" | "level" | "morph";
 }
 
+let globalStageHeartCounter = 0;
+
 export default function DesktopStage({
   petStats,
   setPetStats,
@@ -72,7 +74,7 @@ export default function DesktopStage({
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left - 12;
     const y = e.clientY - rect.top - 24;
-    setHearts((prev) => [...prev, { id: Date.now() + Math.random(), x, y }]);
+    setHearts((prev) => [...prev, { id: Date.now() + Math.random() + (++globalStageHeartCounter), x, y }]);
 
     // Trigger petting states
     setIsPetted(true);

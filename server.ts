@@ -69,6 +69,39 @@ interface AiModelSettings {
   apiKey?: string;
 }
 
+function cleanConversationHistory(
+  history: Array<{ role: "user" | "model"; text: string }>,
+  newMessage: string
+): Array<{ role: "user" | "model"; text: string }> {
+  const cleaned: Array<{ role: "user" | "model"; text: string }> = [];
+  
+  if (history && Array.isArray(history)) {
+    for (const h of history) {
+      const role = h.role === "user" ? "user" : "model";
+      if (cleaned.length === 0) {
+        if (role === "user") {
+          cleaned.push({ role, text: h.text });
+        }
+      } else {
+        const last = cleaned[cleaned.length - 1];
+        if (last.role === role) {
+          last.text += "\n" + h.text;
+        } else {
+          cleaned.push({ role, text: h.text });
+        }
+      }
+    }
+  }
+  
+  if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === "user") {
+    cleaned[cleaned.length - 1].text += "\n" + newMessage;
+  } else {
+    cleaned.push({ role: "user", text: newMessage });
+  }
+  
+  return cleaned;
+}
+
 async function executeCustomAI(
   settings: AiModelSettings | undefined,
   systemInstruction: string,
@@ -84,16 +117,11 @@ async function executeCustomAI(
     try {
       if (provider === "default") {
         const ai = getGeminiClient();
-        const contents: any[] = [];
-        if (history && Array.isArray(history)) {
-          for (const h of history) {
-            contents.push({
-              role: h.role === "user" ? "user" : "model",
-              parts: [{ text: h.text }],
-            });
-          }
-        }
-        contents.push({ role: "user", parts: [{ text: message }] });
+        const cleaned = cleanConversationHistory(history, message);
+        const contents = cleaned.map((c) => ({
+          role: c.role,
+          parts: [{ text: c.text }]
+        }));
 
         const response = await ai.models.generateContent({
           model: "gemini-3.5-flash",
@@ -200,16 +228,11 @@ async function executeCustomAI(
           },
         });
 
-        const contents: any[] = [];
-        if (history && Array.isArray(history)) {
-          for (const h of history) {
-            contents.push({
-              role: h.role === "user" ? "user" : "model",
-              parts: [{ text: h.text }],
-            });
-          }
-        }
-        contents.push({ role: "user", parts: [{ text: message }] });
+        const cleaned = cleanConversationHistory(history, message);
+        const contents = cleaned.map((c) => ({
+          role: c.role,
+          parts: [{ text: c.text }]
+        }));
 
         const response = await customAi.models.generateContent({
           model,

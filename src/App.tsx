@@ -17,6 +17,26 @@ import PetShop from "./components/PetShop";
 import FloatingPet from "./components/FloatingPet";
 import DesktopStage from "./components/DesktopStage";
 
+// Helper to resolve API URLs for both Web deployment and Desktop Packaged environments (Electron/Tauri)
+const getApiUrl = (path: string): string => {
+  if (typeof window !== "undefined") {
+    // Detect if we are running under local filesystem protocols, Tauri/Electron containers, or extension contexts
+    const isPackagedDesktop = 
+      window.location.protocol === "file:" || 
+      window.location.protocol.startsWith("tauri") || 
+      window.location.protocol.startsWith("chrome") ||
+      window.location.hostname === "";
+    
+    if (isPackagedDesktop) {
+      // In Tauri or Electron, the local Express server typically runs locally on port 3000.
+      // Use local storage to dynamically configure a custom server endpoint if desired (e.g. cloud backends).
+      const customEndpoint = localStorage.getItem("DESKTOP_API_ENDPOINT");
+      return `${customEndpoint || "http://localhost:3000"}${path}`;
+    }
+  }
+  return path;
+};
+
 const INITIAL_STATS: PetStats = {
   type: "Hermes",
   name: "Hermes",
@@ -224,7 +244,7 @@ export default function App() {
         text: c.text
       }));
 
-      const res = await fetch("/api/pet/chat", {
+      const res = await fetch(getApiUrl("/api/pet/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -276,7 +296,7 @@ export default function App() {
     setLatestSpeech(`*翻出大本子* 收到核心指令！我这就用 ${currentEngine} 大脑将目标「${goal}」拆解为专属的工作任务链...`);
 
     try {
-      const res = await fetch("/api/pet/plan-tasks", {
+      const res = await fetch(getApiUrl("/api/pet/plan-tasks"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goal, petType: petStats.type, aiModelSettings: aiModelSettings })
@@ -830,15 +850,16 @@ export default function App() {
         </div>
 
         {/* THE FLOATING VIRTUAL CHARACTER CONTAINER */}
-        {activeApp && (
-          <FloatingPet
-            petStats={petStats}
-            onPetClicked={handlePetClicked}
-            latestSpeech={latestSpeech}
-            setLatestSpeech={setLatestSpeech}
-            setPetStats={setPetStats}
-          />
-        )}
+        <FloatingPet
+          petStats={petStats}
+          onPetClicked={handlePetClicked}
+          latestSpeech={latestSpeech}
+          setLatestSpeech={setLatestSpeech}
+          setPetStats={setPetStats}
+          onSendMessage={handleSendMessage}
+          isAiThinking={isAiThinking}
+          activeApp={activeApp}
+        />
 
       </div>
 

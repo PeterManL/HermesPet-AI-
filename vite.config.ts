@@ -5,6 +5,10 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Set relative base path so that all bundled assets are resolved relatively (e.g. './assets/...').
+    // This allows the production 'dist/' build to load standalone from file:// protocols
+    // and packages seamlessly as a native Windows desktop app (via Electron, Tauri, or NW.js).
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion } from "motion/react";
 import { 
   Send, Sparkles, AlertCircle, RefreshCw, Volume2, VolumeX, Brain, 
-  Terminal as TermIcon, ChevronRight, Minimize2, Trash2 
+  Terminal as TermIcon, ChevronRight, Minimize2, Trash2, Mic, MicOff
 } from "lucide-react";
 import { ChatMessage, PetStats } from "../types";
 
@@ -39,6 +39,117 @@ export default function PetTerminal({
   const [isMuted, setIsMuted] = useState(true);
   const [speakProgress, setSpeakProgress] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Speech Recognition hook states
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [autoSendVoice, setAutoSendVoice] = useState(true);
+  const recognitionRef = useRef<any>(null);
+
+  // Check Web Speech API support
+  const SpeechRecognitionAPI = typeof window !== "undefined"
+    ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+    : null;
+
+  const toggleListening = () => {
+    if (!SpeechRecognitionAPI) {
+      alert("当前浏览器暂不支持 Web Speech API 语音识别接口，推荐使用 Chrome/Edge/Safari 浏览器体验完整的语音互动服务。");
+      return;
+    }
+
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  const startListening = () => {
+    if (isThinking) return;
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+
+      // Automatically unmute when user interacts via voice so they can hear the pet's response
+      if (isMuted) {
+        setIsMuted(false);
+      }
+
+      const rec = new SpeechRecognitionAPI();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = "zh-CN";
+
+      rec.onstart = () => {
+        setIsListening(true);
+        setInterimTranscript("");
+      };
+
+      rec.onresult = (event: any) => {
+        let interim = "";
+        let final = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        if (final) {
+          setInputText((prev) => {
+            const updated = (prev + final).trim();
+            if (autoSendVoice && updated) {
+              onSendMessage(updated);
+              return "";
+            }
+            return updated;
+          });
+          setInterimTranscript("");
+        } else {
+          setInterimTranscript(interim);
+        }
+      };
+
+      rec.onerror = (err: any) => {
+        console.error("Speech recognition error:", err);
+        setIsListening(false);
+        setInterimTranscript("");
+        if (err.error === "not-allowed") {
+          alert("麦克风权限已被拒绝！请在浏览器地址栏的锁形/麦克风图标中允许此网站访问麦克风。");
+        }
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+        setInterimTranscript("");
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (e) {
+      console.error("Failed starting speech recognition:", e);
+      setIsListening(false);
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsListening(false);
+    setInterimTranscript("");
+  };
+
+  // Clean up speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
 
   // Auto-scroll chat history
   useEffect(() => {
@@ -144,7 +255,7 @@ export default function PetTerminal({
       {/* Main Body Grid */}
       <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Left Side: Chat Area */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white">
+        <div className="flex-1 flex flex-col min-w-0 bg-white relative">
           {/* Chat Bubble Container */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-indigo-100 scrollbar-track-transparent">
             {chatHistory.length === 0 ? (
@@ -232,20 +343,90 @@ export default function PetTerminal({
               </div>
             )}
           </div>
+ 
+          {/* Real-time Voice Input Visualizer Overlay */}
+          {isListening && (
+            <div className="absolute bottom-16 left-4 right-4 bg-indigo-950/95 backdrop-blur-md text-white rounded-2xl p-4 flex flex-col space-y-2 shadow-2xl border border-indigo-500/30 z-30 select-none animate-pulse" style={{ animationDuration: "5s" }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                  </span>
+                  <span className="text-[10px] font-black font-mono tracking-wider text-rose-400">PET VOICE ENGINE • 语音输入中...</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-350 hover:text-white transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={autoSendVoice}
+                      onChange={(e) => setAutoSendVoice(e.target.checked)}
+                      className="rounded border-slate-750 text-indigo-500 focus:ring-0 bg-transparent cursor-pointer w-3 h-3"
+                    />
+                    <span>说毕自动发送</span>
+                  </label>
+                  <button 
+                    type="button"
+                    onClick={stopListening}
+                    className="text-[9px] bg-white/10 hover:bg-white/20 text-white font-bold py-0.5 px-2 rounded transition-colors cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+              
+              {/* Audio waves visual animation */}
+              <div className="flex items-center gap-1.5 py-1">
+                <div className="h-4 w-1 bg-rose-500 rounded-full animate-bounce" style={{ animationDuration: "0.5s" }}></div>
+                <div className="h-7 w-1 bg-teal-400 rounded-full animate-bounce" style={{ animationDuration: "0.4s" }}></div>
+                <div className="h-9 w-1 bg-white rounded-full animate-bounce" style={{ animationDuration: "0.6s" }}></div>
+                <div className="h-5 w-1 bg-yellow-300 rounded-full animate-bounce" style={{ animationDuration: "0.45s" }}></div>
+                <div className="h-10 w-1 bg-rose-400 rounded-full animate-bounce" style={{ animationDuration: "0.55s" }}></div>
+                <div className="h-7 w-1 bg-teal-350 rounded-full animate-bounce" style={{ animationDuration: "0.4s" }}></div>
+                <div className="h-4 w-1 bg-white rounded-full animate-bounce" style={{ animationDuration: "0.5s" }}></div>
+                
+                <div className="flex-1 ml-3 overflow-hidden">
+                  <p className="text-[11px] text-slate-200 truncate font-mono italic">
+                    {interimTranscript || (inputText ? `(已录入: ${inputText})` : "请开始说话，我会认真聆听...")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Form Input Area */}
-          <form onSubmit={handleSubmit} className="p-3 border-t-2 border-indigo-100/60 bg-indigo-50/20 flex gap-2">
+          <form onSubmit={handleSubmit} className="p-3 border-t-2 border-indigo-100/60 bg-indigo-50/20 flex gap-2 items-center">
+            {/* Microphone Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`p-2.5 rounded-xl transition-all flex items-center justify-center font-bold relative border-2 cursor-pointer ${
+                isListening 
+                  ? "bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-100 animate-pulse" 
+                  : "bg-white text-indigo-500 border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/50"
+              }`}
+              title={isListening ? "正在聆听，点击以停止" : "开启语音麦克风对话"}
+            >
+              {isListening ? <Mic className="w-3.5 h-3.5 text-white" /> : <MicOff className="w-3.5 h-3.5 text-indigo-400" />}
+              {isListening && (
+                <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                </span>
+              )}
+            </button>
+
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={`向 ${petStats.name} 发送消息或调皮提问...`}
+              placeholder={isListening ? "请开始说话..." : `向 ${petStats.name} 发送消息或调皮提问...`}
               disabled={isThinking}
               className="flex-1 bg-white border-2 border-indigo-100 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-indigo-300 focus:outline-none focus:border-indigo-400 disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={!inputText.trim() || isThinking}
+              disabled={(!inputText.trim() && !isListening) || isThinking}
               className="bg-[#FF6B6B] hover:bg-rose-500 disabled:bg-slate-100 text-white disabled:text-slate-400 px-4 py-2 rounded-xl transition-all flex items-center justify-center shadow-md shadow-rose-100/60 font-bold"
             >
               <Send className="w-3.5 h-3.5 stroke-[2.5]" />

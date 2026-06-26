@@ -529,14 +529,17 @@ export default function DesktopStage({
             )}
           </AnimatePresence>
 
-          {/* Render the core beautiful Pixel Art */}
-          <div className="relative flex items-center justify-center w-36 h-36">
-            <div className={`transform ${petStats.status === "sleeping" ? "rotate-90 origin-bottom mt-4" : ""}`}>
-              {renderDesktopPixelArt()}
+          {/* Render the core beautiful Pet Nest Base */}
+          <div className="relative flex flex-col items-center justify-center py-4 select-none z-10">
+            <div className="relative w-28 h-16 flex items-center justify-center text-4xl select-none">
+              <span className="animate-bounce" style={{ animationDuration: "3.5s" }}>🏡</span>
+              {/* Glowing shadow beneath */}
+              <div className="absolute bottom-1 w-20 h-3 bg-indigo-950/10 rounded-full filter blur-sm -z-10 animate-pulse"></div>
             </div>
-
-            {/* Glowing shadow beneath */}
-            <div className="absolute bottom-1 w-24 h-3.5 bg-indigo-950/10 rounded-full filter blur-sm -z-10 animate-pulse"></div>
+            <div className="text-[10px] text-indigo-500 font-extrabold mt-2.5 bg-indigo-50/50 px-3.5 py-1.5 rounded-full border border-indigo-100/50 text-center tracking-wide flex items-center gap-1">
+              <span>{petStats.name}已在桌面自由活动中...</span>
+              <span className="animate-pulse">🐾</span>
+            </div>
           </div>
 
           {/* Instruction helper */}
@@ -652,7 +655,15 @@ export default function DesktopStage({
         
         {/* UPPER RIGHT: Core Vitals Dashboard */}
         <div className="bg-white border-2 border-indigo-100 rounded-3xl p-5 shadow-xl font-mono text-xs text-slate-700 select-none">
-          <span className="font-extrabold text-indigo-950 block border-b-2 border-indigo-50 pb-2 mb-3.5 tracking-wider uppercase">📊 Vitals Dashboard</span>
+          <div className="flex justify-between items-center border-b-2 border-indigo-50 pb-2 mb-3.5">
+            <span className="font-extrabold text-indigo-950 tracking-wider uppercase">📊 Vitals Dashboard</span>
+            {/* Miniature Live Portrait */}
+            <div className="w-8 h-8 rounded-xl overflow-hidden border-2 border-indigo-100 flex items-center justify-center bg-indigo-50/50 scale-90 relative shadow-sm">
+              <div className="scale-[0.38] shrink-0 origin-center flex items-center justify-center absolute">
+                {renderDesktopPixelArt()}
+              </div>
+            </div>
+          </div>
           
           <div className="space-y-3.5">
             {/* Growth core (Lvl & XP) */}

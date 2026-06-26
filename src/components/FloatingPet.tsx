@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Sparkles, Heart, Coffee, Moon, Smile } from "lucide-react";
+import { Sparkles, Heart, Coffee, Moon, Smile, Mic, MicOff, Send } from "lucide-react";
 import { PetStats, PetType } from "../types";
 import { PET_PROFILES } from "../data";
 import { playPetSound, playLevelUpSound } from "../lib/sound";
@@ -11,6 +11,9 @@ interface FloatingPetProps {
   latestSpeech: string | null;
   setLatestSpeech: (speech: string | null) => void;
   setPetStats: React.Dispatch<React.SetStateAction<PetStats>>;
+  onSendMessage?: (text: string) => Promise<void>;
+  isAiThinking?: boolean;
+  activeApp?: string | null;
 }
 
 interface HeartParticle {
@@ -119,7 +122,10 @@ export default function FloatingPet({
   onPetClicked, 
   latestSpeech, 
   setLatestSpeech, 
-  setPetStats 
+  setPetStats,
+  onSendMessage,
+  isAiThinking = false,
+  activeApp = null
 }: FloatingPetProps) {
   const [hearts, setHearts] = useState<HeartParticle[]>([]);
   const [direction, setDirection] = useState<"left" | "right">("right");
@@ -129,6 +135,123 @@ export default function FloatingPet({
   const [activeEmote, setActiveEmote] = useState<"happy_dance" | "curious_look" | "sad_sigh" | null>(null);
   const [emoteAnimation, setEmoteAnimation] = useState<any>({});
   const [emoteParticles, setEmoteParticles] = useState<EmoteParticle[]>([]);
+
+  // Direct chat box and Speech recognition states
+  const [showDirectChat, setShowDirectChat] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [autoSendVoice, setAutoSendVoice] = useState(true);
+  const recognitionRef = useRef<any>(null);
+  const isDraggingRef = useRef(false);
+
+  // Automatically close direct chat if an app window is opened
+  useEffect(() => {
+    if (activeApp !== null) {
+      setShowDirectChat(false);
+    }
+  }, [activeApp]);
+
+  // Check Web Speech API support
+  const SpeechRecognitionAPI = typeof window !== "undefined"
+    ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+    : null;
+
+  const toggleListening = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!SpeechRecognitionAPI) {
+      alert("当前浏览器暂不支持 Web Speech API 语音识别接口，推荐使用 Chrome/Edge/Safari 浏览器体验完整的语音互动服务。");
+      return;
+    }
+
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  const startListening = () => {
+    if (isAiThinking) return;
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+
+      const rec = new SpeechRecognitionAPI();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = "zh-CN";
+
+      rec.onstart = () => {
+        setIsListening(true);
+        setInterimTranscript("");
+      };
+
+      rec.onresult = (event: any) => {
+        let interim = "";
+        let final = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        if (final) {
+          setChatInput((prev) => {
+            const updated = (prev + final).trim();
+            if (autoSendVoice && updated && onSendMessage) {
+              onSendMessage(updated);
+              return "";
+            }
+            return updated;
+          });
+          setInterimTranscript("");
+        } else {
+          setInterimTranscript(interim);
+        }
+      };
+
+      rec.onerror = (err: any) => {
+        console.error("Speech recognition error:", err);
+        setIsListening(false);
+        setInterimTranscript("");
+        if (err.error === "not-allowed") {
+          alert("麦克风权限已被拒绝！请在浏览器地址栏的锁形/麦克风图标中允许此网站访问麦克风。");
+        }
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+        setInterimTranscript("");
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (e) {
+      console.error("Failed starting speech recognition:", e);
+      setIsListening(false);
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsListening(false);
+    setInterimTranscript("");
+  };
+
+  // Clean up speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
 
   const profile = PET_PROFILES[petStats.type];
 
@@ -153,7 +276,25 @@ export default function FloatingPet({
   }, [petStats.status]);
 
   // Pet click action -> spawn hearts!
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = (e: any) => {
+    // If the pet is currently being dragged, ignore click to avoid conflict
+    if (isDraggingRef.current) return;
+
+    // Ignore clicks/taps originating from input fields, buttons, chat panels or emote menus
+    if (e && e.target) {
+      const target = e.target as HTMLElement;
+      if (
+        target.closest('.chat-panel-container') || 
+        target.closest('.emote-menu-container') || 
+        target.closest('.smile-toggle-button') ||
+        target.closest('button') || 
+        target.closest('input') ||
+        target.closest('form')
+      ) {
+        return;
+      }
+    }
+
     onPetClicked();
     playPetSound(petStats.type, "click");
     const newHeart = {
@@ -162,6 +303,11 @@ export default function FloatingPet({
       y: -30
     };
     setHearts((prev) => [...prev, newHeart]);
+
+    // If we are on the desktop with no active windows, toggle direct chat!
+    if (activeApp === null) {
+      setShowDirectChat((prev) => !prev);
+    }
   };
 
   // Remove heart particles after completion
@@ -662,8 +808,17 @@ export default function FloatingPet({
       dragElastic={0.05}
       animate={{ x: walkOffset.x, y: walkOffset.y }}
       transition={{ type: "spring", damping: 15 }}
-      onClick={handleClick}
-      className="absolute bottom-20 right-20 z-40 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center"
+      onDragStart={() => {
+        isDraggingRef.current = true;
+      }}
+      onDragEnd={() => {
+        // Set a brief delay to allow click/tap events to resolve safely
+        setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 120);
+      }}
+      onTap={handleClick}
+      className="absolute bottom-20 right-20 z-40 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center select-none"
     >
       {/* Interactive Speech bubble */}
       <AnimatePresence>
@@ -686,6 +841,94 @@ export default function FloatingPet({
         {renderPixelArt()}
       </div>
 
+      {/* Direct Desktop Chat Input Panel */}
+      <AnimatePresence>
+        {activeApp === null && showDirectChat && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 10 }}
+            className="chat-panel-container mt-3 bg-white/95 backdrop-blur-md border-2 border-indigo-100 rounded-2xl p-2.5 shadow-2xl flex flex-col gap-1.5 pointer-events-auto select-none z-50 w-64 text-slate-800"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            {/* Input field and action buttons */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!chatInput.trim() || isAiThinking) return;
+                if (onSendMessage) {
+                  onSendMessage(chatInput.trim());
+                }
+                setChatInput("");
+              }}
+              className="flex items-center gap-1.5"
+            >
+              {/* Mic toggle */}
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`p-1.5 rounded-lg transition-all flex items-center justify-center font-bold border cursor-pointer ${
+                  isListening
+                    ? "bg-rose-500 text-white border-rose-500 animate-pulse"
+                    : "bg-indigo-50 text-indigo-500 border-indigo-150 hover:bg-indigo-100"
+                }`}
+                title={isListening ? "停止语音录入" : "语音对话"}
+              >
+                {isListening ? (
+                  <Mic className="w-3.5 h-3.5 text-white animate-pulse" />
+                ) : (
+                  <MicOff className="w-3.5 h-3.5 text-indigo-400" />
+                )}
+              </button>
+
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder={isListening ? "正在聆听..." : `和 ${petStats.name} 聊聊天吧...`}
+                disabled={isAiThinking}
+                className="flex-1 min-w-0 bg-indigo-50/30 border border-indigo-100 rounded-xl px-2.5 py-1 text-xs text-slate-800 placeholder-indigo-300 focus:outline-none focus:border-indigo-400 disabled:opacity-50"
+              />
+
+              <button
+                type="submit"
+                disabled={!chatInput.trim() || isAiThinking}
+                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center"
+              >
+                <Send className="w-3 h-3" />
+              </button>
+            </form>
+
+            {/* Status bar / transcripts during listening */}
+            {(isListening || isAiThinking) && (
+              <div className="flex items-center gap-1.5 px-1 text-[9px] font-semibold text-indigo-600">
+                {isListening ? (
+                  <div className="flex items-center gap-1 truncate w-full">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
+                    </span>
+                    <span className="text-rose-500 font-bold truncate">
+                      {interimTranscript || "(请说话...)"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-indigo-500">
+                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0s" }}></span>
+                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }}></span>
+                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }}></span>
+                    <span>思考中...</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Emote menu popup panel */}
       <AnimatePresence>
         {showEmoteMenu && (
@@ -693,8 +936,11 @@ export default function FloatingPet({
             initial={{ opacity: 0, scale: 0.85, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: 10 }}
-            className="absolute bottom-full mb-3 bg-white/95 backdrop-blur-md border border-indigo-150 rounded-2xl p-2 shadow-xl flex gap-1.5 items-center pointer-events-auto select-none z-50 min-w-[210px]"
+            className="emote-menu-container absolute bottom-full mb-3 bg-white/95 backdrop-blur-md border border-indigo-150 rounded-2xl p-2 shadow-xl flex gap-1.5 items-center pointer-events-auto select-none z-50 min-w-[210px]"
             onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           >
             <div className="text-[9px] font-black text-indigo-950 font-sans border-r border-indigo-100 pr-2 mr-1 leading-tight flex flex-col uppercase tracking-wider">
               <span>宠物</span>
@@ -744,7 +990,13 @@ export default function FloatingPet({
       </AnimatePresence>
 
       {/* Small Smile Toggle Button next to the pet */}
-      <div className="absolute -right-7 bottom-5 z-40 pointer-events-auto">
+      <div 
+        className="smile-toggle-button absolute -right-7 bottom-5 z-40 pointer-events-auto"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
         <button
           onClick={(e) => {
             e.stopPropagation();

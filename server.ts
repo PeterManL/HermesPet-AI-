@@ -123,16 +123,32 @@ async function executeCustomAI(
           parts: [{ text: c.text }]
         }));
 
-        const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.8,
-            ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-          },
-        });
-        return response.text || "";
+        const candidateModels = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+        let lastError: any = null;
+
+        for (const modelCandidate of candidateModels) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelCandidate,
+              contents,
+              config: {
+                systemInstruction,
+                temperature: 0.8,
+                ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+              },
+            });
+            if (response && response.text) {
+              return response.text;
+            }
+          } catch (err: any) {
+            console.warn(`[AI Custom execution] Candidate model ${modelCandidate} failed:`, err.message || err);
+            lastError = err;
+          }
+        }
+        if (lastError) {
+          throw lastError;
+        }
+        throw new Error("No candidate models returned a response");
       }
 
       if (provider === "openai") {
@@ -234,16 +250,35 @@ async function executeCustomAI(
           parts: [{ text: c.text }]
         }));
 
-        const response = await customAi.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.8,
-            ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-          },
-        });
-        return response.text || "";
+        const candidateModels = [model];
+        if (model === "gemini-3.5-flash") {
+          candidateModels.push("gemini-2.5-flash", "gemini-1.5-flash");
+        }
+
+        let lastError: any = null;
+        for (const modelCandidate of candidateModels) {
+          try {
+            const response = await customAi.models.generateContent({
+              model: modelCandidate,
+              contents,
+              config: {
+                systemInstruction,
+                temperature: 0.8,
+                ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+              },
+            });
+            if (response && response.text) {
+              return response.text;
+            }
+          } catch (err: any) {
+            console.warn(`[AI Custom execution] Custom Gemini candidate model ${modelCandidate} failed:`, err.message || err);
+            lastError = err;
+          }
+        }
+        if (lastError) {
+          throw lastError;
+        }
+        throw new Error("No custom Gemini candidate models returned a response");
       }
 
       throw new Error(`Unknown provider: ${provider}`);
